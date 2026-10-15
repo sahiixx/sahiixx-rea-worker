@@ -1,0 +1,12 @@
+name = "sahiixx-rea-worker"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+BUS_PROXY_URL = "https://bus.sahiixx.dev"
+# JWT_SECRET and PROXY_TOKEN set as secrets via `wrangler secret put`
+
+[[routes]]
+pattern = "rea-worker.sahiixx.dev/*"
+zone_name = "sahiixx.dev"
