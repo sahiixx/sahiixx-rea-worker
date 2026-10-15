@@ -2,52 +2,57 @@
 
 Edge triage worker for **SAHIIXX REA OS**.
 
-Runs on Cloudflare Workers (Hono). Does **local-only** lightweight analysis:
+Static analysis only at Cloudflare edge:
 
-- Magic byte detection (PE / ELF / WASM / APK / DEX / JS heuristic)
-- Shannon entropy
-- ASCII string extraction + lightweight classification (api_key_candidate, url, geo_or_portal, auth_header)
-- SHA-256
-- Publishes `rea.analysis.completed` event to `sahiixx-bus` via JWT + proxy token
+- Magic byte detection (PE / ELF / WASM / APK / DEX / JS)
+- Shannon entropy per 1 KB blocks
+- ASCII + UTF-16LE string extraction with category scoring (API keys, Bayut/Dubizzle patterns, endpoints, etc.)
+- Evidence chain with offsets + confidence + limitations
+- JWT publish of `rea.analysis.completed` to bus
+- Optional R2 + KV cache + queue fallback
 
-**No binary is uploaded beyond the edge request.** Full Ghidra / REA agent work stays on Hermes / local agents.
+**Not** a full decompiler. Function recovery and clean rebuilds stay with local REA agents / Hermes / Ghidra.
 
 ## Deploy
 
 ```bash
-npm i
-wrangler secret put JWT_SECRET
-wrangler secret put PROXY_TOKEN
+npm install
+wrangler login
+
+# Create resources once
+wrangler r2 bucket create sahiixx-rea-artifacts
+wrangler kv namespace create REA_CACHE   # then paste the id into wrangler.toml
+
+# Secrets
+wrangler secret put BUS_WEBHOOK_URL
+wrangler secret put PROXY_JWT_SECRET
+# optional
+wrangler secret put TITANS_MEMORY_URL
+
 npm run deploy
 ```
 
-## Usage
+Or use `./deployment/deploy.sh`.
+
+## Test
 
 ```bash
-curl -X POST https://rea-worker.sahiixx.dev/analyze \
-  -H "Content-Type: application/octet-stream" \
-  --data-binary @some.apk
+curl -X POST https://<worker>.workers.dev/analyze \
+  -F "file=@some.apk"
+
+# or Bayut bundle scrape
+WORKER_URL=https://<worker>.workers.dev ./deployment/test_e2e.sh bayut
 ```
 
-or multipart:
+## Honest limits
 
-```bash
-curl -X POST https://rea-worker.sahiixx.dev/analyze \
-  -F "file=@bayut.apk"
-```
+- `functions` array is heuristic placeholders (random FUN_ addresses). Real disasm requires Ghidra/Hopper via REA agents.
+- Rebuild code is template + string evidence, not verified reconstruction.
+- 50 MB hard limit. Edge CPU is short.
+- Analyze only software you own or are authorized to examine.
 
-Response includes sha256, magic, entropy, candidate counts. Full event (including strings) is published to the bus for the swarm.
+## Next real work
 
-## Limits
-
-- 8 MB max body (edge constraint)
-- 500 strings max returned
-- ASCII only
-
-## Next
-
-- Wire `agency-agents` StringHunter / PseudocodeCleaner / RebuildTester to consume `rea.analysis.completed`
-- titans-memory + graph-sight indexing
-- friday-os voice intent
-
-Built for Dubai RE vertical. Evidence first.
+1. Replace KV placeholder id in `wrangler.toml`
+2. Wire `agency-agents` StringHunter to the real `rea.analysis.completed` payload
+3. Keep full Ghidra / REA agent path local

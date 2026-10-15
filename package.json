@@ -1,20 +1,24 @@
 {
   "name": "sahiixx-rea-worker",
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "description": "SAHIIXX REA OS - Edge-native Reverse Engineer Anything",
+  "main": "src/index.ts",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "vitest run"
+    "deploy:prod": "wrangler deploy --env production",
+    "tail": "wrangler tail",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.6.0",
-    "jose": "^5.9.0"
+    "hono": "^4.6.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241001.0",
+    "@cloudflare/workers-types": "^4.20241015.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0",
-    "wrangler": "^3.80.0"
+    "wrangler": "^3.90.0"
   }
 }

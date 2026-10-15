@@ -1,12 +1,32 @@
 name = "sahiixx-rea-worker"
 main = "src/index.ts"
-compatibility_date = "2026-10-01"
+compatibility_date = "2026-10-15"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
-BUS_PROXY_URL = "https://bus.sahiixx.dev"
-# JWT_SECRET and PROXY_TOKEN set as secrets via `wrangler secret put`
+[observability]
+enabled = true
 
-[[routes]]
-pattern = "rea-worker.sahiixx.dev/*"
-zone_name = "sahiixx.dev"
+[vars]
+ENV = "production"
+BUS_EVENT_TYPE = "rea.analysis.completed"
+MEMORY_GRAPH_ENABLED = "true"
+MAX_FILE_SIZE_MB = "50"
+ENTROPY_BLOCK_SIZE = "1024"
+
+[[r2_buckets]]
+binding = "REA_BUCKET"
+bucket_name = "sahiixx-rea-artifacts"
+
+[[kv_namespaces]]
+binding = "REA_CACHE"
+id = "rea_cache_kv_placeholder_replace_with_real_id"
+
+[[queues.producers]]
+binding = "REA_QUEUE"
+queue = "rea-analysis-queue"
+
+[triggers]
+crons = ["0 */6 * * *"]
+
+[limits]
+cpu_ms = 50
