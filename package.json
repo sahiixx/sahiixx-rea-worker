@@ -10,7 +10,9 @@
     "deploy:prod": "wrangler deploy --env production",
     "tail": "wrangler tail",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke:e2e": "node scripts/e2e-smoke.mjs",
+    "bus:local": "node scripts/local-bus.mjs"
   },
   "dependencies": {
     "hono": "^4.6.0"

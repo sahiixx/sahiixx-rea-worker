@@ -1,4 +1,11 @@
-export interface ExtractedString { value: string; offset: number; encoding: 'ASCII' | 'UTF16LE'; length: number; categories: string[]; confidence: number; }
+export interface ExtractedString {
+  value: string;
+  offset: number;
+  encoding: 'ASCII' | 'UTF16LE';
+  length: number;
+  categories: string[];
+  confidence: number;
+}
 
 const PATTERNS: Record<string, RegExp> = {
   GENERIC_API_KEY: /(?:api[_-]?key|apikey)\s*[:=]\s*["']?([a-zA-Z0-9_\-]{20,})/i,
@@ -32,6 +39,7 @@ export function extractStrings(bytes: Uint8Array, minLen = 4): ExtractedString[]
       start = 0;
     }
   }
+
   if (current.length >= minLen) {
     const cats = categorize(current);
     const conf = cats.length > 0 ? 0.9 : Math.max(0.5, Math.min(0.8, current.length / 100));
@@ -56,6 +64,7 @@ export function extractStrings(bytes: Uint8Array, minLen = 4): ExtractedString[]
       start = 0;
     }
   }
+
   if (current.length >= minLen) {
     const cats = categorize(current);
     results.push({ value: current, offset: start, encoding: 'UTF16LE', length: current.length, categories: cats, confidence: 0.7 });
