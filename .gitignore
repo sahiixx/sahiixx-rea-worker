@@ -3,4 +3,8 @@ node_modules/
 dist/
 *.log
 .env
+.env.*
+!.env.example
 .dev.vars
+.dev.vars.*
+artifacts/

@@ -6,11 +6,17 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
+    "dev:local": "wrangler dev --local --ip 127.0.0.1 --port 8787",
     "deploy": "wrangler deploy",
-    "deploy:prod": "wrangler deploy --env production",
+    "deploy:prod": "wrangler deploy",
+    "deploy:script": "bash deployment/deploy.sh",
     "tail": "wrangler tail",
     "test": "vitest run",
+    "test:watch": "vitest",
+    "test:tooling": "node --test --test-concurrency=1 scripts/*.check.mjs",
     "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/validate-evidence.mjs",
+    "validate": "node scripts/validate-evidence.mjs",
     "smoke:e2e": "node scripts/e2e-smoke.mjs",
     "bus:local": "node scripts/local-bus.mjs"
   },

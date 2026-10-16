@@ -156,13 +156,16 @@ This repo includes a local smoke flow for a Bayut-like bundle.
 npm run smoke:e2e
 ```
 
-This runs a minimal end-to-end test that:
+Start the Worker separately with `npm run dev:local` before running this script.
+The existing smoke script:
 
-- boots the local worker
 - boots the local bus stub
 - uploads a synthetic bundle with a Bayut-like key and clustering logic
-- validates that the result contains evidence and fields for downstream routing
+- prints the Worker response and manually forwards it to the bus stub
 - writes artifacts to `./artifacts`
+
+This is not an assertion-based verification of the Worker's own signed bus
+publication. Use the local evidence validator below for deterministic assertions.
 
 Artifacts:
 
@@ -172,6 +175,50 @@ Artifacts:
 ## Deploy
 
 This project is built for Cloudflare Workers.
+
+### Reproducible local checks and deployment helper
+
+```bash
+npm ci
+npm run typecheck
+npm run validate
+npm run test:tooling
+# Only analyze files you own or are authorized to inspect:
+npm run validate -- /path/to/authorized.apk ./artifacts/authorized-check
+```
+
+`validate` defaults to a synthetic sample. It checks actual SHA-256, byte offsets,
+schema, confidence and entropy, and writes `triage_result.json` plus a redacted
+`evidence-summary.md` to `artifacts/validate-smoke/`. Unknown/empty files are valid
+triage inputs; vendor-key and clustering assertions apply only to the built-in
+sample. The local runner does not generate or verify rebuild output. Full JSON
+can contain sensitive strings; local artifacts and environment files are ignored.
+`test:tooling` runs offline Node checks; `test` remains the existing Vitest command,
+which currently has no application suites.
+
+For the first production deployment, use `bash deployment/deploy.sh` (or
+`npm run deploy:script`). It installs the locked dependencies, authenticates,
+creates/reuses R2, KV and the configured queue, patches the placeholder REA_CACHE
+ID, prompts for runtime secrets, deploys, and checks the supplied Worker URL.
+See `.env.example` for export/prompt behavior; do not source placeholders or
+commit real secrets. The default `wrangler.toml` is production: no named
+`[env.production]` exists. Resource creation may incur Cloudflare charges.
+
+The Actions workflow runs typecheck, offline tooling checks and synthetic validation on every push/PR.
+Same-repository PRs receive a redacted evidence comment; fork/Dependabot PRs skip
+that write-only step. Manual dispatch on main or a published release can deploy.
+Before using CI deployment, provision resources/runtime secrets once and commit
+the real KV ID (not a credential). Configure GitHub secrets
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and optionally `WORKER_URL`
+(which can also be a repository variable). Protect the `production` environment
+with required reviewers. GitHub credentials do not provision Worker secrets.
+A missing WORKER_URL explicitly skips CI health verification.
+
+`bash PUSH_TO_REPO.sh` prepares a separate feature-branch clone and prints review
+and push commands without publishing. `--push` explicitly opts into a commit and
+normal feature-branch push; there is no forced or direct-main push.
+
+### Manual alternative
 
 1. Log in to Wrangler:
 
@@ -184,7 +231,10 @@ wrangler login
 ```bash
 wrangler r2 bucket create sahiixx-rea-artifacts
 wrangler kv namespace create REA_CACHE
+wrangler queues create rea-analysis-queue
 ```
+
+Replace the REA_CACHE placeholder ID in `wrangler.toml` with the returned ID.
 
 3. Set secrets:
 
