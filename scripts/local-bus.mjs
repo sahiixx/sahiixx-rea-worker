@@ -24,10 +24,18 @@ const server = http.createServer(async (req, res) => {
     });
 
     req.on('end', () => {
-      const entry = { received_at: new Date().toISOString(), body: JSON.parse(body || '{}') };
-      fs.appendFileSync(outPath, `${JSON.stringify(entry)}\n`);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, stored: outPath }));
+      try {
+        const parsed = body ? JSON.parse(body) : {};
+        const entry = { received_at: new Date().toISOString(), body: parsed };
+        fs.appendFileSync(outPath, `${JSON.stringify(entry)}\n`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, stored: outPath }));
+      } catch (err) {
+        const entry = { received_at: new Date().toISOString(), raw: body };
+        fs.appendFileSync(outPath, `${JSON.stringify(entry)}\n`);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+      }
     });
     return;
   }
