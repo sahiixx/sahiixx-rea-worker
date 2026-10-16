@@ -1,0 +1,163 @@
+name: REA Worker CI + Deploy
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: CI / Typecheck + local evidence smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Offline deployment, push-helper and validator regression checks
+        run: npm run test:tooling
+      - name: Validate synthetic evidence and byte offsets
+        run: npm run validate
+      - name: Upload synthetic smoke artifacts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triage-smoke-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            artifacts/validate-smoke/triage_result.json
+            artifacts/validate-smoke/evidence-summary.md
+
+  pr-evidence:
+    name: PR / Evidence summary
+    needs: test
+    # Fork/Dependabot PR tokens cannot write comments. Do not switch to
+    # pull_request_target or run PR code with a privileged token to bypass that.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      # Consume the current run's static report; no checkout/npm/PR code here.
+      - uses: actions/download-artifact@v4
+        with:
+          name: triage-smoke-${{ github.sha }}
+          path: smoke
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const body = fs.readFileSync('smoke/evidence-summary.md', 'utf8');
+            const marker = '<!-- rea-evidence -->';
+            if (!body.startsWith(marker) || body.length > 60000) {
+              throw new Error('Missing or oversized evidence summary');
+            }
+            const issue = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            };
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...issue, per_page: 100,
+            });
+            const previous = comments.find(c =>
+              c.user?.login === 'github-actions[bot]' && c.body?.startsWith(marker));
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: issue.owner, repo: issue.repo, comment_id: previous.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({ ...issue, body });
+            }
+
+  deploy:
+    name: Deploy / Cloudflare Workers
+    needs: test
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    concurrency:
+      group: rea-worker-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify deployment prerequisites
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          for (const key of ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID']) {
+            if (!process.env[key]) throw new Error(`Missing GitHub secret: ${key}`);
+          }
+          const config = fs.readFileSync('wrangler.toml', 'utf8');
+          const cache = config.split('[[kv_namespaces]]').slice(1)
+            .map(s => s.split(/^\[/m)[0])
+            .find(s => /binding\s*=\s*"REA_CACHE"/.test(s));
+          if (!cache || !/\bid\s*=\s*"[0-9a-f]{32}"/i.test(cache)) {
+            throw new Error('Provision resources with deployment/deploy.sh and commit the real REA_CACHE ID first.');
+          }
+          JS
+      - name: Deploy default production configuration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: ./node_modules/.bin/wrangler deploy
+      - name: Health check (explicitly skipped without WORKER_URL)
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL || vars.WORKER_URL }}
+        run: |
+          node --input-type=module <<'JS'
+          if (!process.env.WORKER_URL) {
+            console.log('WORKER_URL is unset: deployed, but health was NOT checked.');
+          } else {
+            const url = new URL(process.env.WORKER_URL);
+            if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
+                url.search || url.hash || !['/', '/health', '/health/'].includes(url.pathname)) {
+              throw new Error('WORKER_URL must be an HTTP(S) origin or /health URL.');
+            }
+            url.pathname = '/health';
+            let lastError;
+            for (let attempt = 0; attempt < 5; attempt++) {
+              try {
+                const response = await fetch(url, { signal: AbortSignal.timeout(10000), redirect: 'error' });
+                if (!response.ok) throw new Error(`Health returned HTTP ${response.status}`);
+                const result = await response.json();
+                if (result.status !== 'ok' || ['bucket', 'cache', 'bus'].some(k => result.checks?.[k] !== true)) {
+                  throw new Error('Health must report status=ok and bucket/cache/bus bindings present.');
+                }
+                console.log('Health passed (binding presence only, not bus delivery).');
+                lastError = null;
+                break;
+              } catch (error) {
+                lastError = error;
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              }
+            }
+            if (lastError) throw lastError;
+          }
+          JS
