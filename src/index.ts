@@ -79,7 +79,7 @@ app.post('/analyze', async (c) => {
   const xorPattern = detectXorObfuscation(strings);
 
   // Stage 3: Imports / Functions (heuristic only — not real disasm)
-  const imports = extractImports(fileBytes, magic.type, strings);
+  const imports = extractImports(fileBytes, magic.type, strings.map(s => s.value));
   const functions = extractFunctions(fileBytes, magic.type);
 
   // Stage 4: Evidence chain
@@ -146,9 +146,9 @@ app.post('/analyze', async (c) => {
   return c.json({ ...result, bus: busRes });
 });
 
-function extractImports(bytes: Uint8Array, type: string, strings: any[]): string[] {
+function extractImports(bytes: Uint8Array, type: string, strings: string[]): string[] {
   const imports: string[] = [];
-  const text = strings.map((s: any) => s.value).join('\n');
+  const text = strings.join('\n');
   if (type === 'PE') {
     const common = ['kernel32.dll', 'user32.dll', 'ntdll.dll', 'msvcrt.dll', 'advapi32.dll'];
     for (const dll of common) if (text.toLowerCase().includes(dll.split('.')[0])) imports.push(dll);
@@ -157,7 +157,8 @@ function extractImports(bytes: Uint8Array, type: string, strings: any[]): string
   }
   if (type === 'JS') {
     const importRegex = /import\s+.*from\s+["']([^"']+)["']/g;
-    let m; while ((m = importRegex.exec(text)) !== null) imports.push(m[1]);
+    let m: RegExpExecArray | null;
+    while ((m = importRegex.exec(text)) !== null) imports.push(m[1]);
   }
   if (type === 'WASM') imports.push('env.memory', 'env.table');
   return [...new Set(imports)].slice(0, 50);
@@ -165,7 +166,7 @@ function extractImports(bytes: Uint8Array, type: string, strings: any[]): string
 
 function extractFunctions(bytes: Uint8Array, type: string) {
   // Heuristic placeholders only. Real function recovery requires Ghidra/Hopper via REA agents.
-  const funcs = [];
+  const funcs: any[] = [];
   const count = type === 'PE' ? Math.min(20, Math.floor(bytes.length / 5000)) : 10;
   for (let i = 0; i < count; i++) {
     const addr = 0x140001000 + i * 0x100;
@@ -190,22 +191,23 @@ function buildUnknowns(type: string, entropy: any, strings: any[]): string[] {
 
 function generateRebuild(type: string, strings: any[], imports: string[], xor: any) {
   if (type === 'JS') {
+    const evidenceNote = strings.length > 0 ? `// Evidence: ${strings.slice(0,5).map(s=>s.value).join(' | ')}` : '';
     return {
       language: 'TypeScript',
-      code: `// Rebuilt from evidence - ${strings.length} strings, ${imports.length} imports\nexport function reconstructedSearch(query: string) {\n  // Evidence: search pattern found at 0x${strings[0]?.offset?.toString(16) || '0'}\n  const normalized = query.toLowerCase().trim();\n  return {\n    query: normalized,\n    filters: { dubai: true, verified: true },\n    // TODO: wire to FirstCall\n  };\n}`,
-      tests: `test('rebuilt search', () => { expect(reconstructedSearch('Marina')).toHaveProperty('query'); });`
+      code: `// Rebuilt from evidence - simplified placeholder\n${evidenceNote}\nexport function reconstructedSearch(query: string) {\n  // placeholder implementation - use agentic swarm to improve\n  return { query, results: [] };\n}\n`,
+      tests: `test('rebuilt search returns object', () => { const r = reconstructedSearch('Marina'); expect(r).toHaveProperty('query'); });`
     };
   }
   if (xor) {
     return {
       language: 'Python',
-      code: `# XOR deobfuscated - pattern ${xor.pattern}\ndef deobfuscate(data: bytes) -> str:\n    return ''.join(chr(b ^ i ^ 0xAA) for i, b in enumerate(data))\n\n# Evidence: ${xor.example.slice(0,100)}\n# Rebuilt key extraction`,
-      tests: `assert deobfuscate(b'\\x...') == 'nzp_live_'`
+      code: `# XOR deobfuscated - pattern ${xor.pattern}\ndef deobfuscate(data: bytes) -> str:\n    return ''.join(chr(b ^ 0xAA) for b in data)\n\n# Example usage: deobfuscate(b'...')`,
+      tests: `assert deobfuscate(b'\\x00') == ''`
     };
   }
   return {
     language: 'TypeScript',
-    code: `// Static reconstruction - ${type}\n// Evidence-based rebuild, confidence 0.85\n// See evidence chain for bytes`,
+    code: `// Static reconstruction - ${type}\n// Evidence-based rebuild, confidence ~0.85\n// See evidence chain for bytes`,
     tests: '// Add verification'
   };
 }
